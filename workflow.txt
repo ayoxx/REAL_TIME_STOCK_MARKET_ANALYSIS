@@ -1,0 +1,9 @@
+created repo in github
+opened repo in vscode
+created env
+cretaed .env
+imported project data pipeline architecture
+go to API market place
+After creating account etc, click on console 
+Create my application for api key or can use the default
+paste my API key in my .env file
