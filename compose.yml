@@ -1,0 +1,176 @@
+services:
+  spark-master:
+
+    image: spark:3.5.1-python3
+    container_name: spark-master
+    command: [
+      "/opt/spark/bin/spark-class",
+      "org.apache.spark.deploy.master.Master",
+      "--host", "spark-master",
+      "--port", "7077",
+      "--webui-port", "8080"]
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark-master
+    ports:
+      - "8081:8080"
+      - "7077:7077"
+    volumes:
+      - spark-data:/opt/spark-data
+    networks:
+      - stock_data
+  
+  # ---------------------------------------------------------------------------------
+  # Spark Worker Node
+  # ---------------------------------------------------------------------------------
+
+  spark-worker:
+    image: spark:3.5.1-python3
+    container_name: spark-worker
+    command: [
+      "/opt/spark/bin/spark-class",
+      "org.apache.spark.deploy.worker.Worker",
+      "spark://spark-master:7077",
+      "--webui-port", "8081"]
+    environment:
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=2G
+    depends_on:
+      - spark-master
+    volumes:
+      - spark-data:/opt/spark-data
+    networks:
+      - stock_data
+
+
+
+    # -------------------- BUILD CONSUMER.PY IMAGE --------------------------------------------
+  consumer:
+    build:
+      context: ./consumer
+      dockerfile: Dockerfile
+    image: stream_consumer
+    container_name: consumer
+    depends_on:
+      - spark-master
+      - kafka
+    restart: unless-stopped
+    volumes:
+      - ivy_cache:/opt/spark/work-dir/.ivy2
+      - ./consumer:/opt/spark/work-dir/apps
+    networks:
+      - stock_data
+    
+
+    # -------------------- KAFKA SERVICE --------------------------------------------
+  
+  kafka:
+    image: confluentinc/cp-kafka:7.4.10
+    container_name: kafka
+    hostname: kafka
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      KAFKA_KRAFT_MODE: "true"
+      KAFKA_PROCESS_ROLES: controller,broker
+      KAFKA_NODE_ID: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      # Define all listener endpoints and ports
+      KAFKA_LISTENERS: PLAINTEXT_INTERNAL://kafka:9092,PLAINTEXT_EXTERNAL://0.0.0.0:9094,CONTROLLER://kafka:9093
+      # Map Listener names to security protocols
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT_INTERNAL:PLAINTEXT,PLAINTEXT_EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Tell Kafka how it should advertise itself to clients
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT_INTERNAL://kafka:9092,PLAINTEXT_EXTERNAL://localhost:9094
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      CLUSTER_ID: "KCgWn3FoR6-ZOtNSY2vrBA"   # OR "kafka-cluster-1" or Unique cluster ID for KRaft mode - I need to run a logic in .env file top get my cluster id
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - stock_data
+    
+
+  # -------------------- KAFKA UI SERVICE --------------------------------------------
+
+  kafka-ui:
+    container_name: kafka-ui
+    image: provectuslabs/kafka-ui:v0.7.2
+    ports:
+      - "8085:8080"
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: 'true'
+    networks:
+      - stock_data
+    
+
+  # -------------------- POSTGRES SERVICE --------------------------------------------
+
+  postgres:
+    image: debezium/postgres:17
+    container_name: postgres_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-0}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-0}
+      POSTGRES_DB: stock_data
+    ports:
+      - "5433:5432"
+    env_file:
+      - .env
+    volumes:
+      - postgres_data:/var/lib/postgres/data
+    networks:
+      - stock_data
+  
+  pgadmin:
+    image: dpage/pgadmin4:9
+    container_name: pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-0}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-0}
+    env_file:
+      - .env
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - stock_data
+
+
+
+
+
+  # -------------------- METABASE --------------------------------------------
+  metabase:
+    image: metabase/metabase:v0.56.4
+    container_name: metabase
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+
+
+
+
+  # -------------------- VOLUMES & NETWORKS --------------------------------------------
+
+volumes:
+  spark-data:
+  kafka-data:
+  ivy_cache:
+  postgres_data:
+
+networks:
+  stock_data:

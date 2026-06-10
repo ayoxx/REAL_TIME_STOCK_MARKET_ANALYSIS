@@ -2,7 +2,12 @@
 *./
 venv/
 .env
-# workflow.txt
+__pycache__/
+*.log
+dockercommands.txt
+workflow.txt
+
+
 
 
 
